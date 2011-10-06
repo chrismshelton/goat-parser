@@ -1,0 +1,78 @@
+#
+# 	Copyright (c) 2011 by Chris Shelton
+# 
+# 	Permission is hereby granted, free of charge, to any person obtaining a
+# 	copy of this software and associated documentation files (the "Software"),
+# 	to deal in the Software without restriction, including without limitation
+# 	the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# 	and/or sell copies of the Software, and to permit persons to whom the
+# 	Software is furnished to do so, subject to the following conditions:
+# 
+# 	The above copyright notice and this permission notice shall be included
+# 	in all copies or substantial portions of the Software.
+# 
+# 	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+# 	OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# 	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# 	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# 	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# 	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# 	IN THE SOFTWARE.
+# 
+# 	Based off Ian Piumarta's peg/leg C parser generators: http://piumarta.com/software/peg/
+
+Grammar		<- Spacing Definition+ EndOfFile
+
+Definition	<- Identifier 	{ $this->beginRule($text); }
+		     LEFTARROW Expression	{ $this->currentRule->setExpression($this->list->pop()); } &{ $this->accept($sPos0) }
+Expression	<- Sequence (SLASH Sequence	{ $this->list->addToAlternates(); }
+			    )*
+Sequence	<- Prefix (Prefix		{ $this->list->addToSequence(); }
+			  )*
+		 / 				{ $this->list->push(new PredicateNode("1")); }
+Prefix		<- AND Action			{ $this->list->push(new PredicateNode($text)); }
+		 / AND Suffix			{ $this->list->push(new PeekNode($this->list->pop())); }
+		 / NOT Suffix			{ $this->list->push(new PeekNotNode($this->list->pop())); }
+		 /     Suffix
+Suffix		<- Primary (QUESTION		{ $this->list->push(new QuestionNode($this->list->pop())); }
+			     / STAR		{ $this->list->push(new StarNode($this->list->pop())); }
+			     / PLUS		{ $this->list->push(new PlusNode($this->list->pop())); }
+			   )?
+Primary		<- Identifier !LEFTARROW	{ $this->list->push(new NameNode($this->list->getRule($text))); }
+		 / OPEN Expression CLOSE
+		 / Literal			{ $this->list->push(new StringNode($text)); }
+		 / Class			{ $this->list->push(new CharClassNode($text)); }
+		 / DOT				{ $this->list->push(new DotNode()); }
+		 / Action			{ $this->list->addAction($text, $this->currentRule); }
+		 / BEGIN			{ $this->list->push(new PredicateNode('$this->markBegin()')); }
+		 / END				{ $this->list->push(new PredicateNode('$this->markEnd()')); }
+Identifier	<- < IdentStart IdentCont* > Spacing
+IdentStart	<- [a-zA-Z_]
+IdentCont	<- IdentStart / [0-9]
+Literal		<- ['] < (!['] Char )* > ['] Spacing
+		 / ["] < (!["] Char )* > ["] Spacing
+Class		<- '[' < (!']' Range)* > ']' Spacing
+Range		<- Char '-' Char / Char
+Char		<- '\\' [abefnrtv'"\[\]\\]
+		 / '\\' [0-3][0-7][0-7]
+		 / '\\' [0-7][0-7]?
+		 / '\\' '-'
+		 / !'\\' .
+LEFTARROW	<- '<-' Spacing
+SLASH		<- '/' Spacing
+AND		<- '&' Spacing
+NOT		<- '!' Spacing
+QUESTION	<- '?' Spacing
+STAR		<- '*' Spacing
+PLUS		<- '+' Spacing
+OPEN		<- '(' Spacing
+CLOSE		<- ')' Spacing
+DOT		<- '.' Spacing
+Spacing		<- (Space / Comment)*
+Comment		<- '#' (!EndOfLine .)* EndOfLine
+Space		<- ' ' / '\t' / EndOfLine
+EndOfLine	<- '\r\n' / '\n' / '\r'
+EndOfFile	<- !.
+Action		<- '{' < [^}]* > '}' Spacing
+BEGIN		<- '<' Spacing
+END		<- '>' Spacing
