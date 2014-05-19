@@ -1,0 +1,170 @@
+%class		GrammarParser
+%namespace	Goat
+%global		config Config
+%top		Grammar
+
+Grammar			= whitespace
+				   $d:Definitions EndOfFile				{ $d }
+
+directive		= percent_no_newline $d:directive1		{ $d }
+
+directive1		= $d:globaldirective					{ $d }
+				| $d:inlinedirective					{ $d }
+				| $d:nsdirective						{ $d }
+				| $d:classdirective						{ $d }
+				| $d:topdirective						{ $d }
+
+globaldirective	= kwglobal
+				  $name:ident_no_newline
+				  $type:identifier						{ \Goat\Node::Option ("global", $name, $type) }
+				| kwglobal
+				  $name:identifier						{ \Goat\Node::Option ("global", $name) }
+
+inlinedirective	= kwinline
+				  $name:identifier						{ \Goat\Node::Option ("inline", $name) }
+
+nsdirective		= kwnamespace
+				  $name:identifier						{ \Goat\Node::Option ("namespace", $name) }
+
+classdirective	= kwclass
+				  $name:identifier						{ \Goat\Node::Option ("class", $name) }
+
+topdirective	= kwtop
+				  $name:identifier						{ \Goat\Node::Option ("top", $name) }
+
+Definitions		= $d:Definition+						{ $d }
+Definition		= $n:identifier
+					equals $e:expression				{ \Goat\Node::Rule ($n, $e) }
+				| $d:directive							{ $d }
+
+expression		= $f:Sequence $r:Alt1					{ \Goat\Node::Choice ($f, $r) }
+Alt1			= bar $f:Sequence $r:Alt1				{ \Goat\Node::Choice ($f, $r) }
+				|  										{ \Goat\Node::Nil() }
+Sequence		= $f:Prefix $r:Sequence1				{ \Goat\Node::Then ($f, $r) }
+Sequence1		= $f:Prefix $r:Sequence1				{ \Goat\Node::Then ($f, $r) }
+				|										{ \Goat\Node::Nil() }
+Prefix			= $v:variable colon
+				  $s:Suffix								{ \Goat\Node::variable ($s, $v) }
+				| and $t:action							{ \Goat\Node::Predicate ($t) }
+				| and $s:Suffix							{ \Goat\Node::Assert ($s) }
+				| not $s:Suffix							{ \Goat\Node::AssertNot ($s) }
+				| $s:Suffix								{ $s }
+Suffix			= $p:Primary $q:Quantifier				{ $q ($p) }
+Quantifier		= question_mark							{ function ($x) { return \Goat\Node::Question ($x); } }
+				| star									{ function ($x) { return \Goat\Node::Star ($x); } }
+				| plus									{ function ($x) { return \Goat\Node::Plus ($x); } }
+				|										{ function ($x) { return $x; } }
+Primary			= $rule:identifier !equals				{ \Goat\Node::Name ($rule) }
+				| open_paren $e:expression close_paren	{ $e }
+				| oc $e:expression cc					{ \Goat\Node::Capture ($e) }
+				| $l:string								{ \Goat\Node::EscapeStringNode ($l) }
+				| $c:Class								{ \Goat\Node::CharacterClassNode ($c) }
+				| dot									{ \Goat\Node::Dot() }
+				| $text:action							{ \Goat\Node::Action ($text) }
+variable		= "$" $id:identifier					{ $id }
+identifier		= $id:identifier_chars whitespace		{ $id }
+ident_no_newline
+				= $id:identifier_chars hspace			{ $id }
+identifier_chars
+				= [a-zA-Z_] [A-Za-z_0-9]*
+#IdentStart		= [a-zA-Z_]
+#IdentCont		= [A-Za-z_0-9]
+string			= $s:sq_string { $s }
+				| $d:dq_string { $d }
+
+sq_string		= "'" $s:sq_string_char* "'" whitespace	{ implode ("", $s) }
+
+
+dq_string		= '"' $d:dq_string_char* '"' whitespace	{ implode ("", $d) }
+
+sq_string_char	= $e:sqesc								{ $e }
+				| $ndq:notsq							{ $ndq }
+notsq			= [^']
+sqesc			= "\\" $e:sqesc1
+sqesc1			= "\\"									{ "\\" }
+				| "'"									{ "'" }
+
+dq_string_char	= $e:dqesc								{ $e }
+				| $ndq:notdq							{ $ndq }
+notdq			= [^"]
+dqesc			= "\\" $e:dqesc1						{ $e }
+dqesc1			= "a"									{ "\a" }
+				| "b"									{ "\b" }
+				| "e"									{ "\033" }
+				| "f"									{ "\f" }
+				| "n"									{ "\n" }
+				| "r"									{ "\r" }
+				| "t"									{ "\t" }
+				| "v"									{ "\v" }
+				| "\\"									{ "\\" }
+				| "\""									{ "\"" }
+				| "x" $x:hexchrs						{ chr(hexdec($x)) }
+				| $o:octchrs							{ chr(octdec($o)) }
+
+hexchrs			= [A-Fa-f0-9] [A-Fa-f0-9]
+octchrs			= [0-3] [0-7] [0-7]
+
+Class			= "[" $c:Class1 "]" whitespace				{ $c }
+Class1			= $c:Class2								{ $c }
+Class2			= $r:Range+								{ $r }
+Range			= $a:Char "-" $b:Char					{ array ($a, $b) }
+				| $c:Char								{ $c }
+Char			= $e:ccesc								{ $e }
+				| $c:notcb								{ $c }
+notcb			= [^\]]
+ccesc			= "\\" $e:ccesc1						{ $e }
+ccesc1			= $l:ccesc2								{ $l }
+				| "a"									{ "\a" }
+				| "b"									{ "\b" }
+				| "e"									{ "\033" }
+				| "f"									{ "\f" }
+				| "n"									{ "\n" }
+				| "r"									{ "\r" }
+				| "t"									{ "\t" }
+				| "v"									{ "\v" }
+				| "x" $x:hexchrs						{ chr(hexdec($x)) }
+				| $o:octchrs							{ chr(octdec($o)) }
+
+ccesc2			= $c:ccesc3								{ $c }
+ccesc3			= "\\"									{ "\\" }
+				| "["									{ "[" }
+				| "]"									{ "]" }
+				| "-"									{ "-" }
+
+kwglobal		= "global" hspace
+kwinline		= "inline" hspace
+kwnamespace		= "namespace" hspace
+kwclass			= "class" hspace
+kwtop			= "top" hspace
+
+percent_no_newline
+				= "%" hspace
+equals			= "=" whitespace
+bar				= "|" whitespace
+and				= "&" whitespace
+not				= "!" whitespace
+question_mark	= "?" whitespace
+star			= "*" whitespace
+plus			= "+" whitespace
+open_paren		= "(" whitespace
+close_paren		= ")" whitespace
+dot				= "." whitespace
+whitespace		= (Space | comment)*
+comment			= "#" [^\r\n]* (EndOfLine | EndOfFile)
+colon			= ":" whitespace
+oc				= "<" whitespace
+cc				= ">" whitespace
+hspace			= hspacec*
+hspacec			= " " | "\t"
+Space			= " " | "\t" | EndOfLine
+EndOfLine		= "\r\n" | "\n" | "\r"
+EndOfFile		= !.
+action			= $act:curly_braces whitespace			{ $act }
+curly_braces	= "{" $t:nested_curly_braces "}"		{ $t }
+
+nested_curly_braces
+				= nested_curly_braces1*
+
+nested_curly_braces1
+				= "{" nested_curly_braces "}"
+				| [^{}]
